@@ -1,0 +1,578 @@
+--=====================================================================
+--  VENICE • MURDER MYSTERY 2
+--  UI: arrastrable | Toggle UI: RightShift | Sin key system
+--  Funciones: ESP (rol/box/tracer), Aimbot, Auto-Coins, Auto-Items, Misc
+--=====================================================================
+
+--// Anti duplicado
+if game:GetService("CoreGui"):FindFirstChild("VeniceMM2") then
+	game:GetService("CoreGui"):FindFirstChild("VeniceMM2"):Destroy()
+end
+
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UIS               = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local Lighting          = game:GetService("Lighting")
+local Workspace         = game:GetService("Workspace")
+local VirtualUser       = game:GetService("VirtualUser")
+local CoreGui           = game:GetService("CoreGui")
+
+local LP  = Players.LocalPlayer
+local Cam = Workspace.CurrentCamera
+
+local Accent  = Color3.fromRGB(150, 100, 255)
+local Accent2 = Color3.fromRGB(255, 90, 130)
+local BG      = Color3.fromRGB(17, 17, 23)
+local Panel   = Color3.fromRGB(25, 25, 33)
+local Row     = Color3.fromRGB(31, 31, 40)
+local TextCol = Color3.fromRGB(215, 215, 230)
+
+--=====================================================================
+-- CONFIG
+--=====================================================================
+local Config = {
+	ESP = {
+		Enabled = false, Ignored = {}, MaxDistance = 600,
+		Box = true, Name = true, Role = true, Distance = true, Tracer = true,
+		Items = true, Coins = false,
+	},
+	Aimbot = {
+		Enabled = false, MurdererOnly = true, FOV = 150,
+		Smooth = 4, AutoShoot = true, AutoSwing = true, Range = 250,
+	},
+	Farm = { AutoCoins = false, MaxDistance = 140, Delay = 0.5, AutoItems = false },
+	Misc = { AntiAFK = true, Fullbright = false },
+}
+
+local RoleColor = {
+	Murderer  = Color3.fromRGB(255, 70, 70),
+	Sheriff   = Color3.fromRGB(80, 170, 255),
+	Innocent  = Color3.fromRGB(90, 235, 130),
+}
+
+--=====================================================================
+-- HELPERS
+--=====================================================================
+local function new(class, props, parent)
+	local inst = Instance.new(class)
+	for k, v in pairs(props) do inst[k] = v end
+	if parent then inst.Parent = parent end
+	return inst
+end
+
+local function corner(obj, r)
+	return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, obj)
+end
+
+local function stroke(obj, col, thick)
+	return new("UIStroke", { Color = col or Color3.fromRGB(55, 55, 72), Thickness = thick or 1 }, obj)
+end
+
+local function getRole(pl)
+	local char = pl.Character
+	local bp   = pl:FindFirstChildOfClass("Backpack")
+	local function has(n)
+		return (char and char:FindFirstChild(n)) or (bp and bp:FindFirstChild(n))
+	end
+	if has("Knife") then return "Murderer" end
+	if has("Gun")   then return "Sheriff"  end
+	return "Innocent"
+end
+
+--=====================================================================
+-- NOTIFICACIONES
+--=====================================================================
+local notifyHolder
+
+local function notify(text, col)
+	if not notifyHolder then return end
+	local f = new("Frame", {
+		Size = UDim2.fromOffset(260, 34),
+		BackgroundColor3 = Panel, BorderSizePixel = 0,
+		BackgroundTransparency = 1,
+	}, notifyHolder)
+	corner(f, 6)
+	stroke(f, col or Accent, 1)
+
+	local bar = new("Frame", {
+		Size = UDim2.new(0, 3, 1, -12), Position = UDim2.fromOffset(8, 6),
+		BackgroundColor3 = col or Accent, BorderSizePixel = 0,
+	}, f)
+	corner(bar, 2)
+
+	local lbl = new("TextLabel", {
+		Size = UDim2.new(1, -22, 1, 0), Position = UDim2.fromOffset(16, 0),
+		BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+		TextSize = 12, TextColor3 = TextCol, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = text,
+	}, f)
+
+	TweenService:Create(f, TweenInfo.new(0.2), { BackgroundTransparency = 0 }):Play()
+	task.delay(2.6, function()
+		TweenService:Create(f, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(lbl, TweenInfo.new(0.25), { TextTransparency = 1 }):Play()
+		task.wait(0.3)
+		f:Destroy()
+	end)
+end
+
+--=====================================================================
+-- UI BASE
+--=====================================================================
+local gui = new("ScreenGui", {
+	Name = "VeniceMM2",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, (gethui and gethui()) or CoreGui)
+
+local Root = new("Frame", {
+	Size = UDim2.fromOffset(540, 380),
+	Position = UDim2.fromScale(0.5, 0.5),
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	BackgroundColor3 = BG,
+	BorderSizePixel = 0,
+}, gui)
+corner(Root, 12)
+stroke(Root, Color3.fromRGB(48, 48, 66), 1)
+
+local scale = new("UIScale", { Scale = 0.9 }, Root)
+
+-- Header
+local Header = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 58),
+	BackgroundColor3 = Panel,
+	BorderSizePixel = 0,
+}, Root)
+corner(Header, 12)
+
+local Grad = new("UIGradient", {
+	Color = ColorSequence.new(Accent, Accent2),
+	Rotation = 25,
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.82),
+		NumberSequenceKeypoint.new(1, 1),
+	}),
+}, Header)
+
+new("TextLabel", {
+	Size = UDim2.new(1, -70, 0, 20), Position = UDim2.fromOffset(18, 11),
+	BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+	TextSize = 16, TextColor3 = Color3.new(1, 1, 1),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "VENICE • MM2",
+}, Header)
+
+new("TextLabel", {
+	Size = UDim2.new(1, -70, 0, 16), Position = UDim2.fromOffset(18, 31),
+	BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+	TextSize = 11, TextColor3 = Color3.fromRGB(160, 160, 185),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "Murder Mystery 2  •  RightShift para ocultar",
+}, Header)
+
+local CloseBtn = new("TextButton", {
+	Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -36, 0, 17),
+	BackgroundColor3 = Color3.fromRGB(45, 45, 60), Text = "×",
+	Font = Enum.Font.GothamBold, TextSize = 17, TextColor3 = TextCol,
+	AutoButtonColor = false, BorderSizePixel = 0,
+}, Header)
+corner(CloseBtn, 6)
+
+-- Sidebar
+local Sidebar = new("Frame", {
+	Size = UDim2.new(0, 128, 1, -70), Position = UDim2.fromOffset(12, 64),
+	BackgroundColor3 = Panel, BorderSizePixel = 0,
+}, Root)
+corner(Sidebar, 10)
+
+new("UIListLayout", {
+	Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+}, Sidebar)
+new("UIPadding", { PaddingTop = UDim.new(0, 8) }, Sidebar)
+
+-- Contenido
+local Content = new("Frame", {
+	Size = UDim2.new(1, -152, 1, -70), Position = UDim2.fromOffset(148, 64),
+	BackgroundTransparency = 1,
+}, Root)
+
+local Pages = {}
+local TabBtns = {}
+local ActiveTab
+
+local function makePage(name, icon)
+	local page = new("ScrollingFrame", {
+		Name = name, Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 3, ScrollBarImageColor3 = Accent,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		Visible = false,
+	}, Content)
+	new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+	new("UIPadding", { PaddingBottom = UDim.new(0, 8) }, page)
+	Pages[name] = page
+
+	local btn = new("TextButton", {
+		Size = UDim2.new(1, -14, 0, 32), BackgroundColor3 = Row,
+		BackgroundTransparency = 1, Text = "  " .. icon .. "  " .. name,
+		Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = Color3.fromRGB(150, 150, 172),
+		AutoButtonColor = false, BorderSizePixel = 0, TextXAlignment = Enum.TextXAlignment.Left,
+	}, Sidebar)
+	corner(btn, 6)
+	TabBtns[name] = btn
+
+	btn.MouseButton1Click:Connect(function()
+		if ActiveTab then
+			Pages[ActiveTab].Visible = false
+			TweenService:Create(TabBtns[ActiveTab], TweenInfo.new(0.15), {
+				BackgroundTransparency = 1, TextColor3 = Color3.fromRGB(150, 150, 172) }):Play()
+		end
+		ActiveTab = name
+		Pages[name].Visible = true
+		TweenService:Create(btn, TweenInfo.new(0.15), {
+			BackgroundTransparency = 0, TextColor3 = Color3.new(1, 1, 1) }):Play()
+		btn.BackgroundColor3 = Accent
+	end)
+
+	return page
+end
+
+--=====================================================================
+-- CONTROLES
+--=====================================================================
+local function addHeader(parent, text)
+	new("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold, TextSize = 11,
+		TextColor3 = Accent, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = string.upper(text),
+	}, parent)
+end
+
+local function addToggle(parent, text, default, callback)
+	local row = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = Row,
+		Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+	}, parent)
+	corner(row, 6)
+
+	new("TextLabel", {
+		Size = UDim2.new(1, -56, 1, 0), Position = UDim2.fromOffset(10, 0),
+		BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+		TextSize = 12, TextColor3 = TextCol, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = text,
+	}, row)
+
+	local track = new("Frame", {
+		Size = UDim2.fromOffset(34, 18), Position = UDim2.new(1, -44, 0.5, -9),
+		BackgroundColor3 = Color3.fromRGB(50, 50, 66), BorderSizePixel = 0,
+	}, row)
+	corner(track, 9)
+
+	local knob = new("Frame", {
+		Size = UDim2.fromOffset(14, 14), Position = UDim2.fromOffset(2, 2),
+		BackgroundColor3 = Color3.fromRGB(240, 240, 248), BorderSizePixel = 0,
+	}, track)
+	corner(knob, 7)
+
+	local state = default or false
+	local function render()
+		TweenService:Create(track, TweenInfo.new(0.14), {
+			BackgroundColor3 = state and Accent or Color3.fromRGB(50, 50, 66) }):Play()
+		TweenService:Create(knob, TweenInfo.new(0.14), {
+			Position = state and UDim2.fromOffset(18, 2) or UDim2.fromOffset(2, 2) }):Play()
+	end
+
+	row.MouseButton1Click:Connect(function()
+		state = not state
+		render()
+		callback(state)
+	end)
+	render()
+
+	return {
+		Set = function(v) state = v; render(); callback(v) end,
+		Get = function() return state end,
+	}
+end
+
+local function addSlider(parent, text, min, max, default, callback)
+	local row = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = Row, BorderSizePixel = 0,
+	}, parent)
+	corner(row, 6)
+
+	new("TextLabel", {
+		Size = UDim2.new(1, -60, 0, 22), Position = UDim2.fromOffset(10, 4),
+		BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
+		TextSize = 12, TextColor3 = TextCol, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = text,
+	}, row)
+
+	local valLbl = new("TextLabel", {
+		Size = UDim2.fromOffset(50, 22), Position = UDim2.new(1, -58, 0, 4),
+		BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+		TextSize = 12, TextColor3 = Accent, TextXAlignment = Enum.TextXAlignment.Right,
+		Text = tostring(default),
+	}, row)
+
+	local bar = new("Frame", {
+		Size = UDim2.new(1, -20, 0, 6), Position = UDim2.new(0, 10, 1, -16),
+		BackgroundColor3 = Color3.fromRGB(48, 48, 62), BorderSizePixel = 0,
+	}, row)
+	corner(bar, 3)
+
+	local fill = new("Frame", {
+		Size = UDim2.new((default - min) / (max - min), 0, 1, 0),
+		BackgroundColor3 = Accent, BorderSizePixel = 0,
+	}, bar)
+	corner(fill, 3)
+
+	local dragging = false
+	local function setFromX(px)
+		local rel = math.clamp((px - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+		local val = math.floor(min + (max - min) * rel + 0.5)
+		fill.Size = UDim2.new(rel, 0, 1, 0)
+		valLbl.Text = tostring(val)
+		callback(val)
+	end
+
+	bar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			setFromX(i.Position.X)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			setFromX(i.Position.X)
+		end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+end
+
+local function addButton(parent, text, callback)
+	local b = new("TextButton", {
+		Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = Row,
+		Text = text, Font = Enum.Font.GothamMedium, TextSize = 12,
+		TextColor3 = TextCol, AutoButtonColor = false, BorderSizePixel = 0,
+	}, parent)
+	corner(b, 6)
+	b.MouseEnter:Connect(function()
+		TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = Accent }):Play()
+	end)
+	b.MouseLeave:Connect(function()
+		TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = Row }):Play()
+	end)
+	b.MouseButton1Click:Connect(callback)
+	return b
+end
+
+--=====================================================================
+-- PÁGINA: VISUALS
+--=====================================================================
+local visualPage = makePage("Visuals", "◈")
+
+addHeader(visualPage, "ESP de jugadores")
+addToggle(visualPage, "Activar ESP", false, function(v)
+	if v and not Drawing then
+		notify("Tu executor no soporta Drawing", Accent2)
+	end
+	Config.ESP.Enabled = v
+end)
+addToggle(visualPage, "Caja", true, function(v) Config.ESP.Box = v end)
+addToggle(visualPage, "Nombre", true, function(v) Config.ESP.Name = v end)
+addToggle(visualPage, "Rol", true, function(v) Config.ESP.Role = v end)
+addToggle(visualPage, "Distancia", true, function(v) Config.ESP.Distance = v end)
+addToggle(visualPage, "Tracer", true, function(v) Config.ESP.Tracer = v end)
+addSlider(visualPage, "Distancia máxima", 50, 2000, 600, function(v) Config.ESP.MaxDistance = v end)
+
+addHeader(visualPage, "Objetos")
+addToggle(visualPage, "ESP de items tirados", true, function(v) Config.ESP.Items = v end)
+addToggle(visualPage, "ESP de monedas", false, function(v) Config.ESP.Coins = v end)
+
+addHeader(visualPage, "Jugadores (clic = activar/desactivar)")
+local PlayerList = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 110), BackgroundColor3 = Color3.fromRGB(21, 21, 28), BorderSizePixel = 0,
+}, visualPage)
+corner(PlayerList, 6)
+local PlayerScroll = new("ScrollingFrame", {
+	Size = UDim2.new(1, -8, 1, -8), Position = UDim2.fromOffset(4, 4),
+	BackgroundTransparency = 1, BorderSizePixel = 0,
+	ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y,
+}, PlayerList)
+new("UIListLayout", { Padding = UDim.new(0, 3) }, PlayerScroll)
+
+local PlayerRows = {}
+
+local function rebuildPlayerList()
+	for _, r in pairs(PlayerRows) do r.row:Destroy() end
+	PlayerRows = {}
+	for _, pl in ipairs(Players:GetPlayers()) do
+		if pl ~= LP then
+			local row = new("TextButton", {
+				Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = Row,
+				Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+			}, PlayerScroll)
+			corner(row, 4)
+			local lbl = new("TextLabel", {
+				Size = UDim2.new(1, -8, 1, 0), Position = UDim2.fromOffset(6, 0),
+				BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+				TextSize = 11, TextColor3 = TextCol, TextXAlignment = Enum.TextXAlignment.Left,
+				Text = pl.Name,
+			}, row)
+			PlayerRows[pl] = { row = row, lbl = lbl }
+			row.MouseButton1Click:Connect(function()
+				Config.ESP.Ignored[pl] = not Config.ESP.Ignored[pl]
+				row.BackgroundColor3 = Config.ESP.Ignored[pl] and Color3.fromRGB(24, 24, 32) or Row
+				lbl.TextTransparency = Config.ESP.Ignored[pl] and 0.5 or 0
+			end)
+		end
+	end
+end
+
+Players.PlayerAdded:Connect(function() task.wait(0.4); rebuildPlayerList() end)
+Players.PlayerRemoving:Connect(function(pl)
+	if PlayerRows[pl] then PlayerRows[pl].row:Destroy(); PlayerRows[pl] = nil end
+end)
+rebuildPlayerList()
+
+task.spawn(function()
+	while gui.Parent do
+		task.wait(1)
+		for pl, r in pairs(PlayerRows) do
+			if pl.Character then
+				r.lbl.TextColor3 = RoleColor[getRole(pl)]
+				r.lbl.Text = pl.Name .. "  ·  " .. getRole(pl)
+			end
+		end
+	end
+end)
+
+--=====================================================================
+-- PÁGINA: AIMBOT
+--=====================================================================
+local aimPage = makePage("Aimbot", "◎")
+
+addHeader(aimPage, "Cámara")
+addToggle(aimPage, "Activar aimbot", false, function(v) Config.Aimbot.Enabled = v end)
+addToggle(aimPage, "Solo al asesino", true, function(v) Config.Aimbot.MurdererOnly = v end)
+addSlider(aimPage, "FOV", 30, 400, 150, function(v) Config.Aimbot.FOV = v end)
+addSlider(aimPage, "Velocidad de giro", 1, 20, 4, function(v) Config.Aimbot.Smooth = v end)
+
+addHeader(aimPage, "Disparo automático")
+addToggle(aimPage, "Auto-disparo (pistola)", true, function(v) Config.Aimbot.AutoShoot = v end)
+addToggle(aimPage, "Auto-corte (cuchillo)", true, function(v) Config.Aimbot.AutoSwing = v end)
+addSlider(aimPage, "Alcance", 20, 400, 250, function(v) Config.Aimbot.Range = v end)
+
+--=====================================================================
+-- PÁGINA: FARM
+--=====================================================================
+local farmPage = makePage("Farm", "✦")
+
+addHeader(farmPage, "Monedas")
+addToggle(farmPage, "Auto-recoger monedas", false, function(v)
+	Config.Farm.AutoCoins = v
+	if v then notify("Farm de monedas activo (teleport)", Accent) end
+end)
+addSlider(farmPage, "Radio de recogida", 20, 400, 140, function(v) Config.Farm.MaxDistance = v end)
+addSlider(farmPage, "Espera entre monedas (x0.1s)", 1, 20, 5, function(v) Config.Farm.Delay = v / 10 end)
+
+addHeader(farmPage, "Items")
+addToggle(farmPage, "Auto-recoger items", false, function(v) Config.Farm.AutoItems = v end)
+
+--=====================================================================
+-- PÁGINA: VARIOS
+--=====================================================================
+local miscPage = makePage("Varios", "⚙")
+
+addHeader(miscPage, "Entorno")
+addToggle(miscPage, "Fullbright", false, function(v)
+	Config.Misc.Fullbright = v
+	if v then
+		Lighting.Brightness  = 3
+		Lighting.ClockTime   = 14
+		Lighting.FogEnd      = 1e6
+		Lighting.GlobalShadows = false
+		Lighting.Ambient     = Color3.fromRGB(160, 160, 160)
+		Lighting.OutdoorAmbient = Color3.fromRGB(160, 160, 160)
+	else
+		Lighting.Brightness  = 1
+		Lighting.ClockTime   = 14
+		Lighting.FogEnd      = 100000
+		Lighting.GlobalShadows = true
+	end
+end)
+addToggle(miscPage, "Anti-AFK", true, function(v) Config.Misc.AntiAFK = v end)
+
+addHeader(miscPage, "Acciones")
+addButton(miscPage, "Rejoin al servidor", function()
+	game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
+end)
+addButton(miscPage, "Limpiar ESP", function()
+	Config.ESP.Ignored = {}
+	rebuildPlayerList()
+	notify("Lista de ESP reiniciada", Accent)
+end)
+addButton(miscPage, "Ocultar UI (RightShift)", function()
+	Root.Visible = false
+end)
+
+--=====================================================================
+-- HUD DE ROL
+--=====================================================================
+local HUD = new("Frame", {
+	Size = UDim2.fromOffset(150, 32), Position = UDim2.fromOffset(14, 14),
+	BackgroundColor3 = Panel, BorderSizePixel = 0, Visible = false,
+}, gui)
+corner(HUD, 8)
+stroke(HUD, Color3.fromRGB(55, 55, 75), 1)
+
+local Dot = new("Frame", {
+	Size = UDim2.fromOffset(8, 8), Position = UDim2.fromOffset(10, 12),
+	BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, HUD)
+corner(Dot, 4)
+
+local RoleLbl = new("TextLabel", {
+	Size = UDim2.new(1, -30, 1, 0), Position = UDim2.fromOffset(26, 0),
+	BackgroundTransparency = 1, Font = Enum.Font.GothamBold,
+	TextSize = 12, TextColor3 = TextCol, TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "…",
+}, HUD)
+
+notifyHolder = new("Frame", {
+	Size = UDim2.fromOffset(260, 0), Position = UDim2.new(0.5, 0, 0, 60),
+	AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1,
+}, gui)
+new("UIListLayout", { Padding = UDim.new(0, 5), HorizontalAlignment = Enum.HorizontalAlignment.Center }, notifyHolder)
+
+task.spawn(function()
+	local last
+	while gui.Parent do
+		task.wait(0.6)
+		if LP.Character then
+			HUD.Visible = true
+			local r = getRole(LP)
+			RoleLbl.Text = string.upper(r)
+			Dot.BackgroundColor3 = RoleColor[r]
+			RoleLbl.TextColor3 = RoleColor[r]
+			if last and last ~= r then
+				notify("Nuevo rol: " .. r, RoleColor[r])
+			end
+			last = r
+		else
+			HUD.Visible = false
+		end
+	end
+end)
+
+--===================================================
